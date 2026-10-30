@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Convertidor MOV a GIF con Transparencia</title>
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #1e293b;
+      --border: #e2e8f0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      background: var(--card);
+      border-radius: 16px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+      width: 100%;
+      max-width: 600px;
+      padding: 32px;
+      border: 1px solid var(--border);
+    }
+
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; text-align: center; }
+    p.subtitle { color: #64748b; font-size: 0.9rem; text-align: center; margin-bottom: 24px; }
+
+    .dropzone {
+      border: 2px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 32px 20px;
+      text-align: center;
+      background: #f1f5f9;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .dropzone:hover, .dropzone.dragover { border-color: var(--primary); background: #e0e7ff; }
+    .dropzone p { margin-top: 8px; font-size: 0.9rem; color: #475569; }
+    .dropzone input { display: none; }
+
+    .file-info {
+      display: none;
+      margin-top: 16px;
+      padding: 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+
+    .options {
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .option-group { display: flex; flex-direction: column; gap: 6px; }
+    .option-group label { font-size: 0.85rem; font-weight: 600; color: #334155; }
+    .option-group select, .option-group input {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      font-size: 0.9rem;
+      outline: none;
+    }
+
+    .btn {
+      width: 100%;
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 24px;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: var(--primary-hover); }
+    .btn:disabled { background: #94a3b8; cursor: not-allowed; }
+
+    .progress-box {
+      margin-top: 20px;
+      display: none;
+    }
+    .progress-bar-bg {
+      background: #e2e8f0;
+      border-radius: 999px;
+      height: 8px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress-bar {
+      background: var(--primary);
+      height: 100%;
+      width: 0%;
+      transition: width 0.2s;
+    }
+    .status-text { font-size: 0.85rem; color: #64748b; text-align: center; }
+
+    .result-container {
+      margin-top: 24px;
+      display: none;
+      text-align: center;
+    }
+
+    /* Fondo de ajedrez para visualizar transparencia */
+    .checkerboard {
+      background-color: #ffffff;
+      background-image: 
+        linear-gradient(45deg, #e2e8f0 25%, transparent 25%), 
+        linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #e2e8f0 75%), 
+        linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 16px;
+      display: inline-block;
+      max-width: 100%;
+    }
+    .checkerboard img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+
+    .download-btn {
+      display: inline-block;
+      margin-top: 16px;
+      background: #10b981;
+      color: white;
+      text-decoration: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .download-btn:hover { background: #059669; }
+
+    .warning-banner {
+      display: none;
+      background: #fef2f2;
+      border: 1px solid #f87171;
+      color: #991b1b;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+    }
+  </style>
+
+  <!-- Dependencias de FFmpeg WebAssembly -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+</head>
+<body>
+
+  <div class="container">
+    <div id="protocolWarning" class="warning-banner">
+      ⚠️ <strong>Aviso:</strong> Estás abriendo el archivo con <code>file:///</code>. Los navegadores bloquean WebAssembly en este modo. Por favor, sírvelo a través de un servidor local (Live Server de VS Code, <code>npx serve</code>, o súbelo a GitHub Pages).
+    </div>
+
+    <h1>Convertidor .MOV a GIF</h1>
+    <p class="subtitle">Conserva la transparencia del video original automáticamente</p>
+
+    <!-- Zona de arrastre de archivo -->
+    <div class="dropzone" id="dropzone">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+      <p><strong>Haz clic aquí</strong> o arrastra tu video <strong>.mov</strong></p>
+      <input type="file" id="fileInput" accept=".mov" />
+    </div>
+
+    <div class="file-info" id="fileInfo"></div>
+
+    <!-- Opciones de optimización -->
+    <div class="options">
+      <div class="option-group">
+        <label for="fps">Fotogramas por segundo (FPS)</label>
+        <select id="fps">
+          <option value="12">12 FPS (Archivo liviano)</option>
+          <option value="15" selected>15 FPS (Recomendado)</option>
+          <option value="24">24 FPS (Fluido)</option>
+          <option value="30">30 FPS (Pesado)</option>
+        </select>
+      </div>
+      <div class="option-group">
+        <label for="scale">Ancho de salida (Escalado)</label>
+        <select id="scale">
+          <option value="-1">Original (Sin escalar)</option>
+          <option value="640">640 px</option>
+          <option value="480" selected>480 px (Recomendado)</option>
+          <option value="320">320 px</option>
+        </select>
+      </div>
+    </div>
+
+    <button id="convertBtn" class="btn" disabled>Selecciona un archivo .MOV</button>
+
+    <!-- Barra de progreso -->
+    <div class="progress-box" id="progressBox">
+      <div class="status-text" id="statusText">Inicializando...</div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+    </div>
+
+    <!-- Previsualización y Descarga -->
+    <div class="result-container" id="resultContainer">
+      <h3 style="font-size: 1rem; margin-bottom: 12px;">Resultado (Fondo cuadriculado = Transparente):</h3>
+      <div class="checkerboard">
+        <img id="gifPreview" alt="GIF Animado" />
+      </div>
+      <div>
+        <a id="downloadBtn" class="download-btn" download="animacion_transparente.gif">Descargar GIF</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Validar protocolo
+    if (window.location.protocol === 'file:') {
+      document.getElementById('protocolWarning').style.display = 'block';
+    }
+
+    const { FFmpeg } = FFmpegWASM;
+    const { fetchFile, toBlobURL } = FFmpegUtil;
+
+    let ffmpeg = null;
+    let selectedFile = null;
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const fileInfo = document.getElementById('fileInfo');
+    const convertBtn = document.getElementById('convertBtn');
+    const progressBox = document.getElementById('progressBox');
+    const progressBar = document.getElementById('progressBar');
+    const statusText = document.getElementById('statusText');
+    const resultContainer = document.getElementById('resultContainer');
+    const gifPreview = document.getElementById('gifPreview');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    // Gestión de Drag and Drop
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) handleFile(e.target.files[0]);
+    });
+
+    function handleFile(file) {
+      if (!file.name.toLowerCase().endsWith('.mov')) {
+        alert('Por favor selecciona un archivo con extensión .mov');
+        return;
+      }
+      selectedFile = file;
+      fileInfo.style.display = 'block';
+      fileInfo.innerHTML = `<strong>Archivo:</strong> ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+      convertBtn.disabled = false;
+      convertBtn.innerText = 'Convertir a GIF con Transparencia';
+      resultContainer.style.display = 'none';
+    }
+
+    // Inicializar y cargar FFmpeg.wasm
+    async function loadFFmpeg() {
+      if (ffmpeg) return ffmpeg;
+      ffmpeg = new FFmpeg();
+
+      statusText.innerText = 'Cargando motor de procesamiento (esto solo tarda la primera vez)...';
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
+      });
+
+      // Monitoreo de progreso
+      ffmpeg.on('progress', ({ progress }) => {
+        const percent = Math.min(Math.max(Math.round(progress * 100), 0), 100);
+        progressBar.style.width = `${percent}%`;
+        statusText.innerText = `Generando GIF transparente... ${percent}%`;
+      });
+
+      return ffmpeg;
+    }
+
+    // Conversión
+    convertBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+
+      try {
+        convertBtn.disabled = true;
+        progressBox.style.display = 'block';
+        progressBar.style.width = '0%';
+        resultContainer.style.display = 'none';
+
+        const ff = await loadFFmpeg();
+
+        statusText.innerText = 'Leyendo archivo de video...';
+        await ff.writeFile('input.mov', await fetchFile(selectedFile));
+
+        const fps = document.getElementById('fps').value;
+        const scale = document.getElementById('scale').value;
+
+        // Construir filtro de redimensionado y FPS
+        let videoFilter = `fps=${fps}`;
+        if (scale !== "-1") {
+          videoFilter += `,scale=${scale}:-2:flags=lanczos`;
+        }
+
+        /* 
+          Filtro clave para conservar la transparencia:
+          1. split: duplica el flujo del video.
+          2. palettegen=reserve_transparent=on: genera una paleta de 256 colores reservando el índice 0 para el canal alfa.
+          3. paletteuse=alpha_threshold=128: mapea los colores y aplica corte al 50% de opacidad para el formato GIF.
+        */
+        const filterComplex = `[0:v] ${videoFilter},split [a][b]; [a] palettegen=reserve_transparent=on:transparency_color=ffffff [p]; [b][p] paletteuse=alpha_threshold=128`;
+
+        statusText.innerText = 'Procesando fotogramas y conservando canal alfa...';
+        
+        await ff.exec([
+          '-i', 'input.mov',
+          '-filter_complex', filterComplex,
+          '-gifflags', '+transdiff',
+          'output.gif'
+        ]);
+
+        statusText.innerText = 'Finalizando...';
+        const data = await ff.readFile('output.gif');
+        const gifBlob = new Blob([data.buffer], { type: 'image/gif' });
+        const gifUrl = URL.createObjectURL(gifBlob);
+
+        // Mostrar GIF en pantalla
+        gifPreview.src = gifUrl;
+        downloadBtn.href = gifUrl;
+        downloadBtn.download = selectedFile.name.replace(/\.[^/.]+$/, "") + "_transparente.gif";
+
+        resultContainer.style.display = 'block';
+        statusText.innerText = '¡Conversión completada con éxito!';
+      } catch (error) {
+        console.error(error);
+        alert('Hubo un error procesando el video: ' + error.message);
+        statusText.innerText = 'Ocurrió un error.';
+      } finally {
+        convertBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
