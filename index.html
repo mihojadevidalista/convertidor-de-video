@@ -70,7 +70,7 @@
     }
     .option-group { display: flex; flex-direction: column; gap: 6px; }
     .option-group label { font-size: 0.85rem; font-weight: 600; color: #334155; }
-    .option-group select, .option-group input {
+    .option-group select {
       padding: 8px 12px;
       border-radius: 8px;
       border: 1px solid #cbd5e1;
@@ -149,30 +149,14 @@
       font-size: 0.9rem;
     }
     .download-btn:hover { background: #059669; }
-
-    .warning-banner {
-      display: none;
-      background: #fef2f2;
-      border: 1px solid #f87171;
-      color: #991b1b;
-      padding: 12px;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      margin-bottom: 20px;
-    }
   </style>
 
-  <!-- Dependencias de FFmpeg WebAssembly -->
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+  <!-- Versión 0.11 autónoma (no sufre bloqueos de Worker en GitHub Pages) -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 </head>
 <body>
 
   <div class="container">
-    <div id="protocolWarning" class="warning-banner">
-      ⚠️ <strong>Aviso:</strong> Estás abriendo el archivo con <code>file:///</code>. Los navegadores bloquean WebAssembly en este modo. Por favor, sírvelo a través de un servidor local (Live Server de VS Code, <code>npx serve</code>, o súbelo a GitHub Pages).
-    </div>
-
     <h1>Convertidor .MOV a GIF</h1>
     <p class="subtitle">Conserva la transparencia del video original automáticamente</p>
 
@@ -193,11 +177,10 @@
           <option value="12">12 FPS (Archivo liviano)</option>
           <option value="15" selected>15 FPS (Recomendado)</option>
           <option value="24">24 FPS (Fluido)</option>
-          <option value="30">30 FPS (Pesado)</option>
         </select>
       </div>
       <div class="option-group">
-        <label for="scale">Ancho de salida (Escalado)</label>
+        <label for="scale">Ancho de salida</label>
         <select id="scale">
           <option value="-1">Original (Sin escalar)</option>
           <option value="640">640 px</option>
@@ -230,15 +213,14 @@
   </div>
 
   <script>
-    // Validar protocolo
-    if (window.location.protocol === 'file:') {
-      document.getElementById('protocolWarning').style.display = 'block';
-    }
+    const { createFFmpeg, fetchFile } = FFmpeg;
 
-    const { FFmpeg } = FFmpegWASM;
-    const { fetchFile, toBlobURL } = FFmpegUtil;
+    // Se usa el motor mono-hilo (st), el cual no requiere encabezados SharedArrayBuffer en GitHub Pages
+    const ffmpeg = createFFmpeg({
+      log: false,
+      corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js'
+    });
 
-    let ffmpeg = null;
     let selectedFile = null;
 
     const dropzone = document.getElementById('dropzone');
@@ -252,7 +234,7 @@
     const gifPreview = document.getElementById('gifPreview');
     const downloadBtn = document.getElementById('downloadBtn');
 
-    // Gestión de Drag and Drop
+    // Drag and Drop
     dropzone.addEventListener('click', () => fileInput.click());
     dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
@@ -278,30 +260,7 @@
       resultContainer.style.display = 'none';
     }
 
-    // Inicializar y cargar FFmpeg.wasm
-    async function loadFFmpeg() {
-      if (ffmpeg) return ffmpeg;
-      ffmpeg = new FFmpeg();
-
-      statusText.innerText = 'Cargando motor de procesamiento (esto solo tarda la primera vez)...';
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      
-      await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
-      });
-
-      // Monitoreo de progreso
-      ffmpeg.on('progress', ({ progress }) => {
-        const percent = Math.min(Math.max(Math.round(progress * 100), 0), 100);
-        progressBar.style.width = `${percent}%`;
-        statusText.innerText = `Generando GIF transparente... ${percent}%`;
-      });
-
-      return ffmpeg;
-    }
-
-    // Conversión
+    // Proceso de conversión
     convertBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
 
@@ -311,53 +270,68 @@
         progressBar.style.width = '0%';
         resultContainer.style.display = 'none';
 
-        const ff = await loadFFmpeg();
+        if (!ffmpeg.isLoaded()) {
+          statusText.innerText = 'Descargando motor FFmpeg (solo ocurre la primera vez)...';
+          await ffmpeg.load();
+        }
 
-        statusText.innerText = 'Leyendo archivo de video...';
-        await ff.writeFile('input.mov', await fetchFile(selectedFile));
+        // Listener de progreso
+        ffmpeg.setProgress(({ ratio }) => {
+          const percent = Math.min(Math.max(Math.round(ratio * 100), 0), 100);
+          progressBar.style.width = `${percent}%`;
+          statusText.innerText = `Generando GIF con canal alfa... ${percent}%`;
+        });
+
+        statusText.innerText = 'Escribiendo archivo de video en memoria...';
+        ffmpeg.FS('writeFile', 'input.mov', await fetchFile(selectedFile));
 
         const fps = document.getElementById('fps').value;
         const scale = document.getElementById('scale').value;
 
-        // Construir filtro de redimensionado y FPS
         let videoFilter = `fps=${fps}`;
         if (scale !== "-1") {
           videoFilter += `,scale=${scale}:-2:flags=lanczos`;
         }
 
         /* 
-          Filtro clave para conservar la transparencia:
-          1. split: duplica el flujo del video.
-          2. palettegen=reserve_transparent=on: genera una paleta de 256 colores reservando el índice 0 para el canal alfa.
-          3. paletteuse=alpha_threshold=128: mapea los colores y aplica corte al 50% de opacidad para el formato GIF.
+          Filtros de preservación de alfa para GIF:
+          - split: bifurca el flujo
+          - palettegen=reserve_transparent=on: reserva el color transparente en la paleta
+          - paletteuse=alpha_threshold=128: preserva los bordes transparentes
         */
         const filterComplex = `[0:v] ${videoFilter},split [a][b]; [a] palettegen=reserve_transparent=on:transparency_color=ffffff [p]; [b][p] paletteuse=alpha_threshold=128`;
 
-        statusText.innerText = 'Procesando fotogramas y conservando canal alfa...';
-        
-        await ff.exec([
+        statusText.innerText = 'Procesando fotogramas... Esto puede tardar unos segundos.';
+
+        await ffmpeg.run(
           '-i', 'input.mov',
           '-filter_complex', filterComplex,
           '-gifflags', '+transdiff',
           'output.gif'
-        ]);
+        );
 
-        statusText.innerText = 'Finalizando...';
-        const data = await ff.readFile('output.gif');
+        statusText.innerText = 'Finalizando exportación...';
+        const data = ffmpeg.FS('readFile', 'output.gif');
         const gifBlob = new Blob([data.buffer], { type: 'image/gif' });
         const gifUrl = URL.createObjectURL(gifBlob);
 
-        // Mostrar GIF en pantalla
+        // Mostrar previsualización
         gifPreview.src = gifUrl;
         downloadBtn.href = gifUrl;
         downloadBtn.download = selectedFile.name.replace(/\.[^/.]+$/, "") + "_transparente.gif";
+
+        // Limpiar memoria interna
+        try {
+          ffmpeg.FS('unlink', 'input.mov');
+          ffmpeg.FS('unlink', 'output.gif');
+        } catch (e) {}
 
         resultContainer.style.display = 'block';
         statusText.innerText = '¡Conversión completada con éxito!';
       } catch (error) {
         console.error(error);
         alert('Hubo un error procesando el video: ' + error.message);
-        statusText.innerText = 'Ocurrió un error.';
+        statusText.innerText = 'Ocurrió un error en la conversión.';
       } finally {
         convertBtn.disabled = false;
       }
