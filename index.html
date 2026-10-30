@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Convertidor MOV a GIF con Transparencia</title>
+  <title>Convertidor MOV a GIF Transparente</title>
   <style>
     :root {
       --primary: #4f46e5;
@@ -29,7 +29,7 @@
     .container {
       background: var(--card);
       border-radius: 16px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
       width: 100%;
       max-width: 600px;
       padding: 32px;
@@ -119,7 +119,6 @@
       text-align: center;
     }
 
-    /* Fondo de ajedrez para visualizar transparencia */
     .checkerboard {
       background-color: #ffffff;
       background-image: 
@@ -151,16 +150,16 @@
     .download-btn:hover { background: #059669; }
   </style>
 
-  <!-- Versión 0.11 autónoma (no sufre bloqueos de Worker en GitHub Pages) -->
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+  <!-- Librerías oficiales con soporte de carga local -->
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+  <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 </head>
 <body>
 
   <div class="container">
-    <h1>Convertidor .MOV a GIF</h1>
+    <h1>Convertidor MOV a GIF</h1>
     <p class="subtitle">Conserva la transparencia del video original automáticamente</p>
 
-    <!-- Zona de arrastre de archivo -->
     <div class="dropzone" id="dropzone">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
       <p><strong>Haz clic aquí</strong> o arrastra tu video <strong>.mov</strong></p>
@@ -169,14 +168,13 @@
 
     <div class="file-info" id="fileInfo"></div>
 
-    <!-- Opciones de optimización -->
     <div class="options">
       <div class="option-group">
         <label for="fps">Fotogramas por segundo (FPS)</label>
         <select id="fps">
-          <option value="12">12 FPS (Archivo liviano)</option>
-          <option value="15" selected>15 FPS (Recomendado)</option>
-          <option value="24">24 FPS (Fluido)</option>
+          <option value="12">12 FPS (Rápido y liviano)</option>
+          <option value="15" selected>15 FPS (Equilibrado)</option>
+          <option value="24">24 FPS (Máxima fluidez)</option>
         </select>
       </div>
       <div class="option-group">
@@ -192,7 +190,6 @@
 
     <button id="convertBtn" class="btn" disabled>Selecciona un archivo .MOV</button>
 
-    <!-- Barra de progreso -->
     <div class="progress-box" id="progressBox">
       <div class="status-text" id="statusText">Inicializando...</div>
       <div class="progress-bar-bg">
@@ -200,7 +197,6 @@
       </div>
     </div>
 
-    <!-- Previsualización y Descarga -->
     <div class="result-container" id="resultContainer">
       <h3 style="font-size: 1rem; margin-bottom: 12px;">Resultado (Fondo cuadriculado = Transparente):</h3>
       <div class="checkerboard">
@@ -213,14 +209,10 @@
   </div>
 
   <script>
-    const { createFFmpeg, fetchFile } = FFmpeg;
+    const { FFmpeg } = window.FFmpegWASM;
+    const { fetchFile, toBlobURL } = window.FFmpegUtil;
 
-    // Se usa el motor mono-hilo (st), el cual no requiere encabezados SharedArrayBuffer en GitHub Pages
-    const ffmpeg = createFFmpeg({
-      log: false,
-      corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js'
-    });
-
+    let ffmpeg = null;
     let selectedFile = null;
 
     const dropzone = document.getElementById('dropzone');
@@ -234,7 +226,6 @@
     const gifPreview = document.getElementById('gifPreview');
     const downloadBtn = document.getElementById('downloadBtn');
 
-    // Drag and Drop
     dropzone.addEventListener('click', () => fileInput.click());
     dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
@@ -249,7 +240,7 @@
 
     function handleFile(file) {
       if (!file.name.toLowerCase().endsWith('.mov')) {
-        alert('Por favor selecciona un archivo con extensión .mov');
+        alert('Por favor selecciona un archivo con formato .mov');
         return;
       }
       selectedFile = file;
@@ -260,7 +251,36 @@
       resultContainer.style.display = 'none';
     }
 
-    // Proceso de conversión
+    // Inicialización sin bloqueos de origen cruzado
+    async function initFFmpeg() {
+      if (ffmpeg) return ffmpeg;
+      ffmpeg = new FFmpeg();
+
+      statusText.innerText = 'Cargando motor de video (solo la primera vez)...';
+
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      const ffmpegURL = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd';
+
+      /* 
+         toBlobURL transforma los scripts externos en objetos Blob locales 
+         de tu dominio (mihojadevidallista.github.io). Esto elimina por completo 
+         el error "cannot be accessed from origin".
+      */
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+        classWorkerURL: await toBlobURL(`${ffmpegURL}/814.ffmpeg.js`, 'text/javascript')
+      });
+
+      ffmpeg.on('progress', ({ progress }) => {
+        const percent = Math.min(Math.max(Math.round(progress * 100), 0), 100);
+        progressBar.style.width = `${percent}%`;
+        statusText.innerText = `Generando GIF transparente... ${percent}%`;
+      });
+
+      return ffmpeg;
+    }
+
     convertBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
 
@@ -270,20 +290,10 @@
         progressBar.style.width = '0%';
         resultContainer.style.display = 'none';
 
-        if (!ffmpeg.isLoaded()) {
-          statusText.innerText = 'Descargando motor FFmpeg (solo ocurre la primera vez)...';
-          await ffmpeg.load();
-        }
+        const ff = await initFFmpeg();
 
-        // Listener de progreso
-        ffmpeg.setProgress(({ ratio }) => {
-          const percent = Math.min(Math.max(Math.round(ratio * 100), 0), 100);
-          progressBar.style.width = `${percent}%`;
-          statusText.innerText = `Generando GIF con canal alfa... ${percent}%`;
-        });
-
-        statusText.innerText = 'Escribiendo archivo de video en memoria...';
-        ffmpeg.FS('writeFile', 'input.mov', await fetchFile(selectedFile));
+        statusText.innerText = 'Leyendo archivo...';
+        await ff.writeFile('input.mov', await fetchFile(selectedFile));
 
         const fps = document.getElementById('fps').value;
         const scale = document.getElementById('scale').value;
@@ -293,45 +303,37 @@
           videoFilter += `,scale=${scale}:-2:flags=lanczos`;
         }
 
-        /* 
-          Filtros de preservación de alfa para GIF:
-          - split: bifurca el flujo
-          - palettegen=reserve_transparent=on: reserva el color transparente en la paleta
-          - paletteuse=alpha_threshold=128: preserva los bordes transparentes
-        */
+        // Filtro que preserva el canal alfa y calcula la paleta de transparencia
         const filterComplex = `[0:v] ${videoFilter},split [a][b]; [a] palettegen=reserve_transparent=on:transparency_color=ffffff [p]; [b][p] paletteuse=alpha_threshold=128`;
 
-        statusText.innerText = 'Procesando fotogramas... Esto puede tardar unos segundos.';
+        statusText.innerText = 'Procesando fotogramas y canal alfa...';
 
-        await ffmpeg.run(
+        await ff.exec([
           '-i', 'input.mov',
           '-filter_complex', filterComplex,
           '-gifflags', '+transdiff',
           'output.gif'
-        );
+        ]);
 
-        statusText.innerText = 'Finalizando exportación...';
-        const data = ffmpeg.FS('readFile', 'output.gif');
+        statusText.innerText = 'Generando archivo final...';
+        const data = await ff.readFile('output.gif');
         const gifBlob = new Blob([data.buffer], { type: 'image/gif' });
         const gifUrl = URL.createObjectURL(gifBlob);
 
-        // Mostrar previsualización
         gifPreview.src = gifUrl;
         downloadBtn.href = gifUrl;
         downloadBtn.download = selectedFile.name.replace(/\.[^/.]+$/, "") + "_transparente.gif";
 
-        // Limpiar memoria interna
-        try {
-          ffmpeg.FS('unlink', 'input.mov');
-          ffmpeg.FS('unlink', 'output.gif');
-        } catch (e) {}
-
         resultContainer.style.display = 'block';
-        statusText.innerText = '¡Conversión completada con éxito!';
+        statusText.innerText = '¡Conversión completada!';
+
+        // Liberar memoria
+        await ff.deleteFile('input.mov');
+        await ff.deleteFile('output.gif');
       } catch (error) {
         console.error(error);
-        alert('Hubo un error procesando el video: ' + error.message);
-        statusText.innerText = 'Ocurrió un error en la conversión.';
+        alert('Error: ' + error.message);
+        statusText.innerText = 'Hubo un error en el procesamiento.';
       } finally {
         convertBtn.disabled = false;
       }
